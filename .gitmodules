@@ -1,0 +1,3 @@
+[submodule "src/hs"]
+	path = src/hs
+	url = git@github.com:Samdal/hs.git

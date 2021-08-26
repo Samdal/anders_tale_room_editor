@@ -1,0 +1,8 @@
+#+AUTHOR: Halvard Samdal
+
+* Options
+** Change between upscale and native resolution
+having upscale makes stuff align pixel perfectly, which makes stuff *not* smooth
+but the performance gain is so large that the option should definetly be there
+
+You could also possibly combine them to make the background upscaled (and translated) and entities native res
