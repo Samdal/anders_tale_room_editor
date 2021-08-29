@@ -19,15 +19,44 @@ uint32_t popup_new_up = 0;
 struct nk_context *ctx;
 struct nk_glfw glfw = {0};
 
+uint32_t tileset_tex;
+hs_tilemap tilemap;
+uint32_t selected_tile = 0;
+
 sfd_Options anders_tale_room = {
   .title        = "Johan, you may now choose a Anders Tale Room file",
   .filter_name  = "Anders tale room",
   .filter       = "*.aroom",
 };
 
+uint32_t tilemap_offset_x, tilemap_offset_y, tilemap_screen_width, tilemap_screen_height;
+
+static void
+framebuffer_size_callback(GLFWwindow* win, const int width, const int height)
+{
+        gd.width = width;
+        gd.height = height;
+        const float viewport_height = (float)gd.width * ((float)tilemap.height/tilemap.width);
+        if (viewport_height > gd.height) {
+                const float viewport_width = (float)gd.height * ((float)tilemap.width/tilemap.height);
+                tilemap_offset_x = ((gd.width - viewport_width) / 2);
+                tilemap_offset_y = 0;
+                tilemap_screen_width = viewport_width;
+                tilemap_screen_height = gd.height;
+        } else {
+                tilemap_offset_x = 0;
+                tilemap_offset_y = ((gd.height - viewport_height) / 2);
+                tilemap_screen_width = gd.width;
+                tilemap_screen_height = viewport_height;
+        }
+
+        tilemap_offset_x += 200;
+        tilemap_screen_width -= 200;
+}
+
 static inline void init()
 {
-        hs_init(&gd, "Anders tale room editor (mfw Johan anderstaler istendefor å game)", NULL, 0);
+        hs_init(&gd, "Anders tale room editor (mfw Johan anderstaler istendefor å game)", framebuffer_size_callback, 0);
 
         ctx = nk_glfw3_init(&glfw, gd.window, NK_GLFW3_INSTALL_CALLBACKS);
         /* Load Fonts: if none of these are loaded a default font will be used  */
@@ -70,17 +99,28 @@ static inline void popup_start()
 
 static inline void popup_new_room()
 {
-
-        if (nk_begin(ctx, "Create new room", nk_rect(gd.width/2 - 100, gd.height/2 - 85, 200, 170),
+        if (nk_begin(ctx, "Create new room", nk_rect(gd.width/2 - 100, gd.height/2 - 70, 200, 140),
                     NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
+                static int room_width = 20;
+                static int room_height = 20;
 
                 nk_layout_row_dynamic(ctx, 30, 1);
-                static int new_room_width = 0;
-                nk_property_int(ctx, "Room width:", 0, &new_room_width, 100, 1, 1);
-                static int new_room_height = 0;
-                nk_property_int(ctx, "Room height:", 0, &new_room_height, 100, 1, 1);
+                nk_property_int(ctx, "Room width:", 0, &room_width, 60, 1, 1);
+                nk_property_int(ctx, "Room height:", 0, &room_height, 60, 1, 1);
 
-                if (nk_button_label(ctx, "Create new room")) {
+                nk_layout_row_dynamic(ctx, 30, 2);
+                if (nk_button_label(ctx, "Create room")) {
+                        tilemap.width = room_width;
+                        tilemap.height = room_height;
+                        tilemap.tile_width = 1.0f/room_width;
+                        tilemap.tile_height = 1.0f/room_height;
+
+                        if (tileset_tex) {
+                               hs_tilemap_init(&tilemap, tileset_tex, 0);
+                        }
+
+                        popup_new_up = false;
+                        popup_menu_up = false;
                 }
 
                 if (nk_button_label(ctx, "Back")) {
@@ -95,8 +135,10 @@ static struct nk_image*
 create_tiles(const char* filename, const uint32_t width, const uint32_t height)
 {
         int tileset_width, tileset_height;
-        struct nk_image tileset = hs_nk_image_load_size_info(filename, &tileset_width, &tileset_height);
+        tileset_tex = hs_tex2d_create_size_info_pixel(filename, GL_RGBA, &tileset_width, &tileset_height);
+        struct nk_image tileset = nk_image_id(tileset_tex);
         struct nk_image* tiles = (struct nk_image*)malloc(sizeof(struct nk_image) * width * height);
+        assert(tiles);
 
         const int tile_width = tileset_width / width;
         const int tile_height = tileset_height / height;
@@ -122,7 +164,6 @@ static inline void side_bar()
         static char* filename_short = (char*)default_name;
 
         static struct nk_image* tileset_images = NULL;
-        static uint32_t selected_tile = 0;
         static uint32_t tileset_image_count = 0;
         static uint32_t tileset_popup = 0;
 
@@ -131,7 +172,6 @@ static inline void side_bar()
                 nk_label(ctx, filename_short, NK_TEXT_CENTERED);
 
                 nk_layout_row_dynamic(ctx, 30, 1);
-
                 if (nk_button_label(ctx, "Choose new tileset")) {
                         filename = (char*)sfd_open_dialog(&(sfd_Options){
                                         .title = "Choose a tileset",
@@ -154,33 +194,32 @@ static inline void side_bar()
                 if (tileset_popup &&
                     nk_popup_begin(ctx, NK_POPUP_STATIC, "Select tileset size",
                                    NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_TITLE,
-                                   nk_rect(200, 30, 320, 210))) {
+                                   nk_rect(200, 30, 320, 140))) {
                         static int tileset_width = 5;
                         static int tileset_height = 3;
-                        static int tile_width = 32;
-                        static int tile_height = 32;
 
                         nk_layout_row_dynamic(ctx, 30, 1);
                         nk_property_int(ctx, "Tileset width (in tiles):", 1, &tileset_width, 20, 1, 0.4f);
                         nk_property_int(ctx, "Tileset height (in tiles):", 1, &tileset_height, 50, 1, 0.5f);
-                        nk_property_int(ctx, "Tile width (in px):", 8, &tile_width, 64, 1, 0.5f);
-                        nk_property_int(ctx, "Tile height (in px):", 8, &tile_height, 64, 1, 0.5f);
 
                         nk_layout_row_dynamic(ctx, 30, 2);
                         if (nk_button_label(ctx, "Confirm")) {
-                                if (!tileset_images)
+                                if (tileset_images) {
                                         free(tileset_images);
-                                tileset_images = create_tiles(filename, tileset_width, tileset_height);
-                                if (!tileset_images) {
-                                        filename = NULL;
-                                        filename_short = (char*)default_name;
-                                } else {
-                                        tileset_image_count = tileset_width * tileset_height;
-                                        tileset_chosen = true;
+                                        glDeleteTextures(1, &tileset_tex);
+                                        tileset_tex = 0;
                                 }
+
+                                tileset_images = create_tiles(filename, tileset_width, tileset_height);
+                                tileset_image_count = tileset_width * tileset_height;
+
+                                tilemap.tileset_width = tileset_width;
+                                tilemap.tileset_height = tileset_height;
+                                tilemap.sp.tex.tex_unit = tileset_tex;
+
+                                tileset_chosen = true;
                                 tileset_popup = false;
                                 nk_popup_close(ctx);
-
                         }
                         if (nk_button_label(ctx, "Quit")) {
                                 filename = NULL;
@@ -195,8 +234,10 @@ static inline void side_bar()
                 if (tileset_chosen) {
                         nk_layout_row_dynamic(ctx, 20, 1);
                         nk_label(ctx, "Selected tile:", NK_TEXT_CENTERED);
+
                         nk_layout_row_dynamic(ctx, 190, 1);
                         nk_image(ctx, tileset_images[selected_tile]);
+
                         nk_layout_row_dynamic(ctx, 60, 3);
                         for (uint32_t i = 0; i < tileset_image_count; i++) {
                                 if (nk_button_image(ctx, tileset_images[i]))
@@ -204,7 +245,6 @@ static inline void side_bar()
                         }
                 }
         }
-
         nk_end(ctx);
 }
 
@@ -216,16 +256,35 @@ static inline void loop()
         side_bar();
         if (popup_menu_up) {
                 popup_start();
-        } else {
-                if (popup_new_up)
-                        popup_new_room();
+        } else if (popup_new_up) {
+                popup_new_room();
         }
 
-        /* Draw */
-        glfwGetWindowSize(gd.window, (int*)&gd.width, (int*)&gd.height);
-        glViewport(0, 0, gd.width, gd.height);
-
+        glViewport(0, 0, gd.height, gd.width);
         hs_clear(0.2, 0.2, 0.2, 1.0, 0);
+        glEnable(GL_BLEND);
+
+        if (tilemap.vertices && gd.width > 200) {
+                glViewport(tilemap_offset_x, tilemap_offset_y, tilemap_screen_width, tilemap_screen_height);
+
+                hs_tex2d_activate(tilemap.sp.tex.tex_unit, GL_TEXTURE0);
+                hs_tilemap_draw(tilemap);
+                if (glfwGetMouseButton(gd.window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS) {
+                        double xpos, ypos;
+                        glfwGetCursorPos(gd.window, &xpos, &ypos);
+                        // reverse y axis
+                        ypos -= gd.height;
+                        ypos *= -1;
+
+                        if(xpos > tilemap_offset_x && xpos < tilemap_offset_x + tilemap_screen_width &&
+                           ypos > tilemap_offset_y && ypos < tilemap_offset_y + tilemap_screen_height) {
+                                int32_t tilex = (xpos - tilemap_offset_x) / (tilemap.tile_width * tilemap_screen_width);
+                                int32_t tiley = (ypos - tilemap_offset_y) / (tilemap.tile_height * tilemap_screen_height);
+                                hs_tilemap_set_xy(&tilemap, tilex, tiley, selected_tile);
+                                hs_tilemap_update_vbo(tilemap);
+                        }
+                }
+        }
 
         /* IMPORTANT: `nk_glfw_render` modifies some global OpenGL state
          * with blending, scissor, face culling, depth test and viewport and
