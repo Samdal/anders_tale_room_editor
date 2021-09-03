@@ -11,6 +11,7 @@ struct nk_glfw glfw = {0};
 
 hs_tilemap tilemap;
 uint32_t selected_tile = 0;
+uint32_t tileset_chosen = false;
 hs_aroom current_room;
 
 uint32_t popup_new_room_on = 0;
@@ -75,12 +76,13 @@ init_new_room(const uint32_t room_width, const uint32_t room_height)
 
         if (current_room.data)
                 free(current_room.data);
-        uint16_t* room_data = malloc(sizeof(uint16_t) * room_width * room_height);
+        uint8_t* room_data = calloc(1, sizeof(uint8_t) * room_width * room_height);
         assert(room_data);
 
         current_room = (hs_aroom){
                 .width = room_width,
                 .height = room_height,
+                .layers = 1,
                 .data = room_data,
         };
 }
@@ -150,9 +152,9 @@ create_tiles(const char* filename, const uint32_t width, const uint32_t height)
 static inline void
 side_bar()
 {
-        const char* const default_name = "No tileset selected";
-        static char* filename = NULL;
-        static char* filename_short = (char*)default_name;
+        const char* const tileset_default_name = "No tileset selected";
+        static char* tileset_filename = NULL;
+        static char* tileset_filename_short = (char*)tileset_default_name;
 
         const char* const not_selected = "No tilemap selected";
         const char* const edited = "Tilemap edited";
@@ -173,12 +175,19 @@ side_bar()
                 }
 
                 nk_layout_row_dynamic(ctx, 30, 1);
-                if (nk_button_label(ctx, "load room")) {
+                if (nk_button_label(ctx, "Load room")) {
                         const char *filename = sfd_open_dialog(&anders_tale_room);
                         if (filename) {
-                                printf("Got file: '%s'\n", filename);
-                        } else {
-                                printf("load canceled\n");
+                                current_room = hs_aroom_from_file(filename);
+                                hs_aroom_to_tilemap(current_room, &tilemap, 1);
+                                framebuffer_size_callback(gd.window, gd.width, gd.height);
+                        }
+                }
+                if (current_room.data &&
+                    nk_button_label(ctx, "Save room")) {
+                        const char *filename = sfd_save_dialog(&anders_tale_room);
+                        if (filename) {
+                                hs_aroom_write_to_file(filename, current_room);
                         }
                 }
                 if (popup_new_room_on) {
@@ -189,30 +198,28 @@ side_bar()
 
                 nk_layout_row_dynamic(ctx, 10, 1);
                 nk_layout_row_dynamic(ctx, 10, 1);
-                nk_label(ctx, filename_short, NK_TEXT_CENTERED);
+                nk_label(ctx, tileset_filename_short, NK_TEXT_CENTERED);
 
                 nk_layout_row_dynamic(ctx, 30, 1);
                 if (nk_button_label(ctx, "Choose new tileset")) {
-                        filename = (char*)sfd_open_dialog(&(sfd_Options){
+                        tileset_filename = (char*)sfd_open_dialog(&(sfd_Options){
                                         .title = "Choose a tileset",
                                         .filter_name = "PNG image",
                                         .filter = "*.png",
                                 });
 
-                        if (filename && filename[0] != '\0') {
+                        if (tileset_filename && tileset_filename[0] != '\0') {
                                 tileset_popup_on = true;
 
-                                char* last_slash_pos = filename;
-                                for (char* f = filename; f[1] != '\0'; f++)
+                                char* last_slash_pos = tileset_filename;
+                                for (char* f = tileset_filename; f[1] != '\0'; f++)
                                         if (f[0] == '/' || f[0] == '\\')
                                                 last_slash_pos = f + 1;
-                                filename_short = last_slash_pos;
+                                tileset_filename_short = last_slash_pos;
                         } else {
-                                filename_short = (char*)default_name;
+                                tileset_filename_short = (char*)tileset_default_name;
                         }
                 }
-
-                static uint32_t tileset_created = false;
 
                 if (tileset_popup_on &&
                     nk_popup_begin(ctx, NK_POPUP_STATIC, "Select tileset size",
@@ -233,7 +240,7 @@ side_bar()
                                         tilemap.sp.tex.tex_unit = 0;
                                 }
 
-                                tileset_images = create_tiles(filename, tileset_width, tileset_height);
+                                tileset_images = create_tiles(tileset_filename, tileset_width, tileset_height);
                                 tileset_image_count = tileset_width * tileset_height;
 
                                 tilemap.tileset_width = tileset_width;
@@ -241,18 +248,16 @@ side_bar()
                                 tilemap.sp.tex.tex_unit = tilemap.sp.tex.tex_unit;
 
                                 if (tilemap.width) {
-                                        //TODO change texture and offsets instead of recreating tilemap
-                                        hs_tilemap_init(&tilemap, tilemap.sp.tex.tex_unit, 0);
-                                        framebuffer_size_callback(gd.window, gd.width, gd.height);
+                                        hs_aroom_set_tilemap(current_room, &tilemap, 1);
                                 }
 
                                 tileset_popup_on = false;
-                                tileset_created = true;
+                                tileset_chosen = true;
                                 nk_popup_close(ctx);
                         }
                         if (nk_button_label(ctx, "Quit")) {
-                                filename = NULL;
-                                filename_short = (char*)default_name;
+                                tileset_filename = NULL;
+                                tileset_filename_short = (char*)tileset_default_name;
                                 tileset_popup_on = false;
                                 nk_popup_close(ctx);
                         }
@@ -260,7 +265,7 @@ side_bar()
                         nk_popup_end(ctx);
                 }
 
-                if (tileset_created) {
+                if (tileset_chosen) {
                         nk_layout_row_dynamic(ctx, 20, 1);
                         nk_label(ctx, "Selected tile:", NK_TEXT_CENTERED);
 
@@ -288,7 +293,7 @@ static inline void loop()
 
                 hs_tex2d_activate(tilemap.sp.tex.tex_unit, GL_TEXTURE0);
                 hs_tilemap_draw(tilemap);
-                if (tilemap.sp.tex.tex_unit && glfwGetMouseButton(gd.window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS) {
+                if (tileset_chosen && glfwGetMouseButton(gd.window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS) {
                         double xpos, ypos;
                         glfwGetCursorPos(gd.window, &xpos, &ypos);
 
@@ -300,7 +305,6 @@ static inline void loop()
                         if (hs_aroom_get_xy(current_room, tilex, tiley) != selected_tile &&
                             xpos > tilemap_offset_x && xpos < tilemap_offset_x + tilemap_screen_width &&
                             ypos > tilemap_offset_y && ypos < tilemap_offset_y + tilemap_screen_height) {
-                                puts("edited");
                                 hs_tilemap_set_xy(&tilemap, tilex, tiley, selected_tile);
                                 hs_aroom_set_xy(&current_room, tilex, tiley, selected_tile);
                                 hs_tilemap_update_vbo(tilemap);
