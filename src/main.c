@@ -13,6 +13,9 @@ hs_tilemap tilemap;
 uint32_t selected_tile = 0;
 uint32_t tileset_chosen = false;
 hs_aroom current_room;
+hs_aroom undo_room;
+
+hs_key* undo_key = &(hs_key){.key = GLFW_KEY_Z};
 
 uint32_t popup_new_room_on = 0;
 
@@ -33,24 +36,24 @@ static void
 framebuffer_size_callback(GLFWwindow* win, const int width, const int height)
 {
         gd.width = width;
+        tilemap_screen_width = width - 200;
         gd.height = height;
         if (tilemap.vertices) {
-                const float viewport_height = (float)gd.width * ((float)tilemap.height/tilemap.width);
+                const float viewport_height = (float)tilemap_screen_width * ((float)tilemap.height/tilemap.width);
                 if (viewport_height > gd.height) {
                         const float viewport_width = (float)gd.height * ((float)tilemap.width/tilemap.height);
-                        tilemap_offset_x = (gd.width - viewport_width) / 2;
+                        tilemap_offset_x = (tilemap_screen_width - viewport_width) / 2;
                         tilemap_offset_y = 0;
                         tilemap_screen_width = viewport_width;
                         tilemap_screen_height = gd.height;
                 } else {
                         tilemap_offset_x = 0;
                         tilemap_offset_y = (gd.height - viewport_height) / 2;
-                        tilemap_screen_width = gd.width;
+                        tilemap_screen_width = tilemap_screen_width;
                         tilemap_screen_height = viewport_height;
                 }
 
                 tilemap_offset_x += 200;
-                tilemap_screen_width -= 200;
         }
 }
 
@@ -76,14 +79,25 @@ init_new_room(const uint32_t room_width, const uint32_t room_height)
 
         if (current_room.data)
                 free(current_room.data);
+        if (undo_room.data)
+                free(undo_room.data);
         uint8_t* room_data = calloc(1, sizeof(uint8_t) * room_width * room_height);
         assert(room_data);
+
+        uint8_t* undo_data = calloc(1, sizeof(uint8_t) * room_width * room_height);
+        assert(undo_data);
 
         current_room = (hs_aroom){
                 .width = room_width,
                 .height = room_height,
                 .layers = 1,
                 .data = room_data,
+        };
+        undo_room = (hs_aroom){
+                .width = room_width,
+                .height = room_height,
+                .layers = 1,
+                .data = undo_data,
         };
 }
 
@@ -179,6 +193,7 @@ side_bar()
                         const char *filename = sfd_open_dialog(&anders_tale_room);
                         if (filename) {
                                 current_room = hs_aroom_from_file(filename);
+                                undo_room = hs_aroom_from_file(filename);
                                 hs_aroom_to_tilemap(current_room, &tilemap, 1);
                                 framebuffer_size_callback(gd.window, gd.width, gd.height);
                         }
@@ -293,21 +308,37 @@ static inline void loop()
 
                 hs_tex2d_activate(tilemap.sp.tex.tex_unit, GL_TEXTURE0);
                 hs_tilemap_draw(tilemap);
-                if (tileset_chosen && glfwGetMouseButton(gd.window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS) {
-                        double xpos, ypos;
-                        glfwGetCursorPos(gd.window, &xpos, &ypos);
 
-                        // reverse y axis
-                        ypos -= gd.height;
-                        ypos *= -1;
-                        int32_t tilex = (xpos - tilemap_offset_x) / (tilemap.tile_width * tilemap_screen_width);
-                        int32_t tiley = (ypos - tilemap_offset_y) / (tilemap.tile_height * tilemap_screen_height);
-                        if (hs_aroom_get_xy(current_room, tilex, tiley) != selected_tile &&
-                            xpos > tilemap_offset_x && xpos < tilemap_offset_x + tilemap_screen_width &&
-                            ypos > tilemap_offset_y && ypos < tilemap_offset_y + tilemap_screen_height) {
-                                hs_tilemap_set_xy(&tilemap, tilex, tiley, selected_tile);
-                                hs_aroom_set_xy(&current_room, tilex, tiley, selected_tile);
-                                hs_tilemap_update_vbo(tilemap);
+                if (tileset_chosen) {
+                        static uint32_t undo_buffer_update = true;
+
+                        if (hs_get_key_toggle(gd, undo_key) == HS_KEY_PRESSED) {
+                                undo_buffer_update = false;
+                                memcpy(current_room.data, undo_room.data, current_room.width * current_room.height);
+                                hs_aroom_set_tilemap(current_room, &tilemap, 1);
+                        } else if (glfwGetMouseButton(gd.window, GLFW_MOUSE_BUTTON_1) == GLFW_PRESS) {
+                                double xpos, ypos;
+                                glfwGetCursorPos(gd.window, &xpos, &ypos);
+
+                                // reverse y axis
+                                ypos -= gd.height;
+                                ypos *= -1;
+                                int32_t tilex = (xpos - tilemap_offset_x) / (tilemap.tile_width * tilemap_screen_width);
+                                int32_t tiley = (ypos - tilemap_offset_y) / (tilemap.tile_height * tilemap_screen_height);
+                                if (hs_aroom_get_xy(current_room, tilex, tiley) != selected_tile &&
+                                    xpos > tilemap_offset_x && xpos < tilemap_offset_x + tilemap_screen_width &&
+                                    ypos > tilemap_offset_y && ypos < tilemap_offset_y + tilemap_screen_height) {
+                                        if (undo_buffer_update) {
+                                                undo_buffer_update = false;
+                                                memcpy(undo_room.data, current_room.data, undo_room.width * undo_room.height);
+                                        }
+                                        hs_aroom_set_xy(&current_room, tilex, tiley, selected_tile);
+
+                                        hs_tilemap_set_xy(&tilemap, tilex, tiley, selected_tile);
+                                        hs_tilemap_update_vbo(tilemap);
+                                }
+                        } else if (!undo_buffer_update) {
+                                undo_buffer_update = true;
                         }
                 }
         }
