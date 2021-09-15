@@ -11,7 +11,7 @@ linux-win: src/main.c
 .PHONY: run clean
 
 run: build
-	./bin/app
+	./$(name)
 
 clean:
 	rm -rf bin/

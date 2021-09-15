@@ -1,0 +1,4 @@
+* Anders Tale Room editor
+This project is mainly a personal project for creating rooms for my game Anders Tale. It was made using my own opengl library and the nuklear immidiate mode GUI library.
+* Screenshot
+[[./screenshot.png]]

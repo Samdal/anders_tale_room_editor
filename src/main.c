@@ -49,7 +49,6 @@ framebuffer_size_callback(GLFWwindow* win, const int width, const int height)
                 } else {
                         tilemap_offset_x = 0;
                         tilemap_offset_y = (gd.height - viewport_height) / 2;
-                        tilemap_screen_width = tilemap_screen_width;
                         tilemap_screen_height = viewport_height;
                 }
 
@@ -119,8 +118,8 @@ popup_create_new_room()
                 if (nk_button_label(ctx, "Create room")) {
                         tilemap.width = room_width;
                         tilemap.height = room_height;
-                        tilemap.tile_width = 1.0f/room_width;
-                        tilemap.tile_height = 1.0f/room_height;
+                        tilemap.tile_width = 1.0f/tilemap.width;
+                        tilemap.tile_height = 1.0f/tilemap.height;
 
                         init_new_room(room_width, room_height);
 
@@ -163,25 +162,41 @@ create_tiles(const char* filename, const uint32_t width, const uint32_t height)
         return tiles;
 }
 
+char* set_and_get_filename_short(char* file_path_src, char** file_path_dest) {
+        if (*file_path_dest) {
+                free(*file_path_dest);
+                *file_path_dest = NULL;
+        }
+        *file_path_dest = malloc(strlen(file_path_src)+1);
+        assert(*file_path_dest);
+        strcpy(*file_path_dest, file_path_src);
+
+        char* last_slash_pos = file_path_src;
+        for (char* f = *file_path_dest; f[1] != '\0'; f++)
+                if (f[0] == '/' || f[0] == '\\')
+                        last_slash_pos = f + 1;
+        return last_slash_pos;
+}
+
 static inline void
 side_bar()
 {
-        const char* const tileset_default_name = "No tileset selected";
-        static char* tileset_filename = NULL;
-        static char* tileset_filename_short = (char*)tileset_default_name;
-
-        const char* const not_selected = "No tilemap selected";
-        const char* const edited = "Tilemap edited";
-        const char* const saved = "All changes saved";
-        static char* room_editing_state = (char*)not_selected;
-
-        static struct nk_image* tileset_images = NULL;
-        static uint32_t tileset_image_count = 0;
-        static uint32_t tileset_popup_on = 0;
-
         if (nk_begin(ctx, "Side bar", nk_rect(0, 0, 200, gd.height), 0)) {
+                const char* const tileset_default_name = "No tileset selected";
+                static char* tileset_filename = NULL;
+                static char* tileset_filename_short = (char*)tileset_default_name;
+
+                const char* const tilemap_default_name = "No tilemap selected";
+                const char* const tilemap_new = "New tilemap";
+                static char* tilemap_filename = NULL;
+                static char* tilemap_filename_short = (char*)tilemap_default_name;
+
+                static struct nk_image* tileset_images = NULL;
+                static uint32_t tileset_image_count = 0;
+                static uint32_t tileset_popup_on = 0;
+
                 nk_layout_row_dynamic(ctx, 10, 1);
-                nk_label(ctx, room_editing_state, NK_TEXT_CENTERED);
+                nk_label(ctx, tilemap_filename_short, NK_TEXT_CENTERED);
 
                 nk_layout_row_dynamic(ctx, 30, 1);
                 if (nk_button_label(ctx, "New room")) {
@@ -192,8 +207,13 @@ side_bar()
                 if (nk_button_label(ctx, "Load room")) {
                         const char *filename = sfd_open_dialog(&anders_tale_room);
                         if (filename) {
-                                current_room = hs_aroom_from_file(filename);
+                                tilemap_filename_short = set_and_get_filename_short((char*)filename, &tilemap_filename);
+
                                 undo_room = hs_aroom_from_file(filename);
+                                current_room = hs_aroom_from_file(filename);
+                                tilemap.tile_width = 1.0f/current_room.width;
+                                tilemap.tile_height = 1.0f/current_room.height;
+
                                 hs_aroom_to_tilemap(current_room, &tilemap, 1);
                                 framebuffer_size_callback(gd.window, gd.width, gd.height);
                         }
@@ -203,11 +223,12 @@ side_bar()
                         const char *filename = sfd_save_dialog(&anders_tale_room);
                         if (filename) {
                                 hs_aroom_write_to_file(filename, current_room);
+                                tilemap_filename_short = set_and_get_filename_short((char*)filename, &tilemap_filename);
                         }
                 }
                 if (popup_new_room_on) {
                         if (popup_create_new_room()) {
-                                room_editing_state = (char*)edited;
+                                tilemap_filename_short = (char*)tilemap_new;
                         }
                 }
 
@@ -217,20 +238,15 @@ side_bar()
 
                 nk_layout_row_dynamic(ctx, 30, 1);
                 if (nk_button_label(ctx, "Choose new tileset")) {
-                        tileset_filename = (char*)sfd_open_dialog(&(sfd_Options){
+                        char* filename = (char*)sfd_open_dialog(&(sfd_Options){
                                         .title = "Choose a tileset",
                                         .filter_name = "PNG image",
                                         .filter = "*.png",
                                 });
 
-                        if (tileset_filename && tileset_filename[0] != '\0') {
+                        if (filename && filename[0] != '\0') {
                                 tileset_popup_on = true;
-
-                                char* last_slash_pos = tileset_filename;
-                                for (char* f = tileset_filename; f[1] != '\0'; f++)
-                                        if (f[0] == '/' || f[0] == '\\')
-                                                last_slash_pos = f + 1;
-                                tileset_filename_short = last_slash_pos;
+                                tileset_filename_short = set_and_get_filename_short((char*)filename, &tileset_filename);
                         } else {
                                 tileset_filename_short = (char*)tileset_default_name;
                         }
@@ -260,7 +276,6 @@ side_bar()
 
                                 tilemap.tileset_width = tileset_width;
                                 tilemap.tileset_height = tileset_height;
-                                tilemap.sp.tex.tex_unit = tilemap.sp.tex.tex_unit;
 
                                 if (tilemap.width) {
                                         hs_aroom_set_tilemap(current_room, &tilemap, 1);
@@ -271,8 +286,6 @@ side_bar()
                                 nk_popup_close(ctx);
                         }
                         if (nk_button_label(ctx, "Quit")) {
-                                tileset_filename = NULL;
-                                tileset_filename_short = (char*)tileset_default_name;
                                 tileset_popup_on = false;
                                 nk_popup_close(ctx);
                         }
