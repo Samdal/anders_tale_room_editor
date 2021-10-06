@@ -73,7 +73,7 @@ static inline void init()
 static inline void
 init_new_room(const uint32_t room_width, const uint32_t room_height)
 {
-        hs_tilemap_init(&tilemap, tilemap.sp.tex.tex_unit, 0);
+        hs_tilemap_init(&tilemap, 0);
         framebuffer_size_callback(gd.window, gd.width, gd.height);
 
         if (current_room.data)
@@ -141,8 +141,8 @@ static struct nk_image*
 create_tiles(const char* filename, const uint32_t width, const uint32_t height)
 {
         int tileset_width, tileset_height;
-        tilemap.sp.tex.tex_unit = hs_tex2d_create_size_info_pixel(filename, GL_RGBA, &tileset_width, &tileset_height);
-        struct nk_image tileset = nk_image_id(tilemap.sp.tex.tex_unit);
+        tilemap.tex = hs_tex2d_create_size_info_pixel(filename, GL_RGBA, &tileset_width, &tileset_height);
+        struct nk_image tileset = nk_image_id(tilemap.tex);
         struct nk_image* tiles = (struct nk_image*)malloc(sizeof(struct nk_image) * width * height);
         assert(tiles);
 
@@ -267,8 +267,8 @@ side_bar()
                         if (nk_button_label(ctx, "Confirm")) {
                                 if (tileset_images) {
                                         free(tileset_images);
-                                        glDeleteTextures(1, &tilemap.sp.tex.tex_unit);
-                                        tilemap.sp.tex.tex_unit = 0;
+                                        glDeleteTextures(1, &tilemap.tex);
+                                        tilemap.tex= 0;
                                 }
 
                                 tileset_images = create_tiles(tileset_filename, tileset_width, tileset_height);
@@ -319,7 +319,7 @@ static inline void loop()
         if (tilemap.vertices && gd.width > 200) {
                 glViewport(tilemap_offset_x, tilemap_offset_y, tilemap_screen_width, tilemap_screen_height);
 
-                hs_tex2d_activate(tilemap.sp.tex.tex_unit, GL_TEXTURE0);
+                hs_tex2d_activate(tilemap.tex, GL_TEXTURE0);
                 hs_tilemap_draw(tilemap);
 
                 if (tileset_chosen) {
